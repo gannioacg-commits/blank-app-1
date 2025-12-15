@@ -9,6 +9,51 @@ DB_PATH = "facturas.db"
 PDF_DIR = "pdfs"
 os.makedirs(PDF_DIR, exist_ok=True)
 
+# ================= ESTILOS =================
+st.set_page_config(page_title="Gestor de Facturas", layout="centered")
+
+st.markdown("""
+<style>
+:root {
+    --green: #1f8f4c;
+    --green-dark: #166b39;
+}
+
+.stApp {
+    background-color: #f6f9f7;
+}
+
+header {visibility: hidden;}
+
+.title {
+    font-size: 28px;
+    font-weight: 700;
+    color: #1f2937;
+    margin-bottom: 25px;
+}
+
+.card {
+    background: white;
+    padding: 25px;
+    border-radius: 14px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+}
+
+.stButton > button {
+    background-color: var(--green);
+    color: white;
+    border-radius: 10px;
+    height: 48px;
+    font-weight: 600;
+    border: none;
+}
+
+.stButton > button:hover {
+    background-color: var(--green-dark);
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ================= DB =================
 def get_conn():
     return sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -37,42 +82,59 @@ CREATE TABLE IF NOT EXISTS facturas (
 """)
 conn.commit()
 
-# ================= UI =================
-st.title("📄 Gestor de Facturas PDF")
+# ================= HEADER =================
+st.image(
+    "https://dummyimage.com/1200x200/1f8f4c/ffffff&text=ATHENS+CHEMICAL+GROUP",
+    use_container_width=True
+)
 
-# --- Proveedor ---
-st.subheader("Proveedor")
+st.markdown('<div class="card">', unsafe_allow_html=True)
+st.markdown('<div class="title">Gestor de Descarga de Facturas de Proveedores</div>', unsafe_allow_html=True)
+
+# ================= PROVEEDOR =================
 proveedores = cursor.execute("SELECT nombre FROM proveedores ORDER BY nombre").fetchall()
 proveedor_nombres = [p[0] for p in proveedores]
 
-opcion = st.radio("Proveedor", ["Seleccionar existente", "Crear nuevo"])
+proveedor = st.selectbox(
+    "Proveedor",
+    options=[""] + proveedor_nombres,
+    placeholder="Seleccione un proveedor existente"
+)
 
-if opcion == "Crear nuevo":
-    proveedor = st.text_input("Nombre del proveedor")
-    if st.button("Crear proveedor") and proveedor:
-        try:
-            cursor.execute("INSERT INTO proveedores (nombre) VALUES (?)", (proveedor,))
-            conn.commit()
-            st.success("Proveedor creado")
-        except sqlite3.IntegrityError:
-            st.error("El proveedor ya existe")
-else:
-    proveedor = st.selectbox("Seleccionar proveedor", proveedor_nombres)
+nuevo = st.text_input("O crear nuevo proveedor")
+if nuevo:
+    try:
+        cursor.execute("INSERT INTO proveedores (nombre) VALUES (?)", (nuevo,))
+        conn.commit()
+        proveedor = nuevo
+        st.success("Proveedor creado")
+    except sqlite3.IntegrityError:
+        st.warning("El proveedor ya existe")
 
-# --- Factura ---
-st.subheader("Datos de la factura")
-descripcion = st.text_input("Descripción")
-mes = st.selectbox("Mes", list(range(1, 13)))
-anio = st.selectbox("Año", list(range(2020, datetime.now().year + 1)))
-pdf = st.file_uploader("Adjuntar factura (PDF)", type=["pdf"])
+# ================= FACTURA =================
+descripcion = st.text_input("Descripción de la factura")
 
-if st.button("Guardar factura"):
+meses = {
+    "Enero": 1, "Febrero": 2, "Marzo": 3, "Abril": 4,
+    "Mayo": 5, "Junio": 6, "Julio": 7, "Agosto": 8,
+    "Septiembre": 9, "Octubre": 10, "Noviembre": 11, "Diciembre": 12
+}
+
+col1, col2 = st.columns(2)
+with col1:
+    mes_nombre = st.selectbox("Mes", list(meses.keys()))
+with col2:
+    anio = st.selectbox("Año", list(range(2020, datetime.now().year + 1)))
+
+pdf = st.file_uploader("Archivo PDF", type=["pdf"])
+
+if st.button("Guardar en la base de datos"):
     if proveedor and descripcion and pdf:
         prov_id = cursor.execute(
             "SELECT id FROM proveedores WHERE nombre=?", (proveedor,)
         ).fetchone()[0]
 
-        filename = f"{proveedor}_{anio}_{mes}_{pdf.name}".replace(" ", "_")
+        filename = f"{proveedor}_{anio}_{meses[mes_nombre]}_{pdf.name}".replace(" ", "_")
         path = os.path.join(PDF_DIR, filename)
 
         with open(path, "wb") as f:
@@ -83,15 +145,17 @@ if st.button("Guardar factura"):
             INSERT INTO facturas (proveedor_id, descripcion, mes, anio, pdf_path, fecha_carga)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (prov_id, descripcion, mes, anio, path, datetime.now().isoformat())
+            (prov_id, descripcion, meses[mes_nombre], anio, path, datetime.now().isoformat())
         )
         conn.commit()
         st.success("Factura guardada correctamente")
     else:
-        st.error("Completar todos los campos")
+        st.error("Completá todos los campos")
 
-# --- Consulta ---
-st.subheader("📂 Facturas cargadas")
+st.markdown('</div>', unsafe_allow_html=True)
+
+# ================= LISTADO =================
+st.markdown("## 📂 Facturas cargadas")
 rows = cursor.execute(
     """
     SELECT p.nombre, f.descripcion, f.mes, f.anio, f.pdf_path
@@ -102,6 +166,6 @@ rows = cursor.execute(
 ).fetchall()
 
 for r in rows:
-    with st.expander(f"{r[0]} - {r[1]} ({r[2]}/{r[3]})"):
+    with st.expander(f"{r[0]} – {r[1]} ({r[2]}/{r[3]})"):
         with open(r[4], "rb") as file:
             st.download_button("Descargar PDF", file, file_name=os.path.basename(r[4]))
